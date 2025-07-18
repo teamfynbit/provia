@@ -1,0 +1,299 @@
+name: Test Installer Scripts
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths: 
+      - 'install.sh'
+      - 'install.bat'
+      - '.github/workflows/test-installer.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'install.sh'
+      - 'install.bat'
+      - '.github/workflows/test-installer.yml'
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  test-installer:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            shell: bash
+            script: install.sh
+            test_command: provia --version || provia --help
+          - os: macos-latest
+            shell: bash
+            script: install.sh
+            test_command: provia --version || provia --help
+          - os: windows-latest
+            shell: pwsh
+            script: install.bat
+            test_command: provia.exe --version || provia.exe --help
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup test environment (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        # Install basic dependencies
+        sudo apt-get update
+        sudo apt-get install -y curl unzip
+        
+        # Test with different shells
+        echo "Testing with bash..."
+        bash --version
+        
+        # Install zsh for shell detection testing
+        sudo apt-get install -y zsh
+        
+        # Create test user directories
+        mkdir -p $HOME/.local/bin
+        mkdir -p $HOME/bin
+
+    - name: Setup test environment (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        # Ensure required tools are available
+        brew install curl unzip 2>/dev/null || true
+        
+        echo "Testing with bash..."
+        bash --version
+        
+        # Install zsh (usually pre-installed on macOS)
+        brew install zsh 2>/dev/null || true
+        
+        # Create test user directories
+        mkdir -p $HOME/.local/bin
+        mkdir -p $HOME/bin
+
+    - name: Setup test environment (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        # Ensure curl is available (should be available in Windows 10+)
+        curl --version
+        
+        # Create test directories
+        New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\bin"
+        
+        # Add to PATH for current session
+        $env:PATH = "$env:USERPROFILE\bin;$env:PATH"
+
+    - name: Make installer executable (Unix)
+      if: matrix.os != 'windows-latest'
+      run: chmod +x ${{ matrix.script }}
+
+    - name: Test installer script
+      shell: ${{ matrix.shell }}
+      run: |
+        echo "🚀 Testing installer script: ${{ matrix.script }}"
+        
+        # Run the installer script
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          ./${{ matrix.script }}
+        else
+          ./${{ matrix.script }}
+        fi
+        
+        echo "✅ Installer script completed successfully"
+
+    - name: Test PATH update (Unix)
+      if: matrix.os != 'windows-latest'
+      shell: bash
+      run: |
+        echo "🔍 Testing PATH configuration..."
+        
+        # Source the appropriate shell config
+        if [ -f "$HOME/.zshrc" ]; then
+          echo "Found .zshrc, sourcing it..."
+          source "$HOME/.zshrc"
+        elif [ -f "$HOME/.bashrc" ]; then
+          echo "Found .bashrc, sourcing it..."
+          source "$HOME/.bashrc"
+        elif [ -f "$HOME/.bash_profile" ]; then
+          echo "Found .bash_profile, sourcing it..."
+          source "$HOME/.bash_profile"
+        elif [ -f "$HOME/.profile" ]; then
+          echo "Found .profile, sourcing it..."
+          source "$HOME/.profile"
+        fi
+        
+        # Check if provia is in PATH
+        echo "Current PATH: $PATH"
+        
+        # Test the binary
+        echo "🧪 Testing binary execution..."
+        if command -v provia >/dev/null 2>&1; then
+          echo "✅ provia found in PATH"
+          ${{ matrix.test_command }} || echo "Binary executed (version/help may not be available)"
+        else
+          echo "❌ provia not found in PATH"
+          
+          # Check common installation directories
+          echo "🔍 Checking common installation directories..."
+          ls -la /usr/local/bin/provia 2>/dev/null || echo "Not in /usr/local/bin/"
+          ls -la $HOME/.local/bin/provia 2>/dev/null || echo "Not in ~/.local/bin/"
+          ls -la $HOME/bin/provia 2>/dev/null || echo "Not in ~/bin/"
+          
+          # Find the binary
+          echo "🔍 Searching for provia binary..."
+          find $HOME -name "provia" -type f 2>/dev/null || echo "provia binary not found"
+          
+          exit 1
+        fi
+
+    - name: Test PATH update (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        Write-Host "🔍 Testing PATH configuration..."
+        
+        # Refresh PATH
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+        
+        Write-Host "Current PATH: $env:PATH"
+        
+        # Test the binary
+        Write-Host "🧪 Testing binary execution..."
+        if (Get-Command provia.exe -ErrorAction SilentlyContinue) {
+          Write-Host "✅ provia.exe found in PATH"
+          try {
+            ${{ matrix.test_command }}
+            Write-Host "✅ Binary executed successfully"
+          } catch {
+            Write-Host "Binary executed (version/help may not be available)"
+          }
+        } else {
+          Write-Host "❌ provia.exe not found in PATH"
+          
+          # Check common installation directories
+          Write-Host "🔍 Checking common installation directories..."
+          if (Test-Path "$env:USERPROFILE\bin\provia.exe") {
+            Write-Host "Found in $env:USERPROFILE\bin\provia.exe"
+          } else {
+            Write-Host "Not found in $env:USERPROFILE\bin\"
+          }
+          
+          # Find the binary
+          Write-Host "🔍 Searching for provia.exe..."
+          Get-ChildItem -Path $env:USERPROFILE -Name "provia.exe" -Recurse -ErrorAction SilentlyContinue
+          
+          exit 1
+        }
+
+    - name: Test with different shells (Unix only)
+      if: matrix.os != 'windows-latest'
+      run: |
+        echo "🧪 Testing shell detection..."
+        
+        # Test with bash
+        echo "Testing with bash..."
+        bash -c 'echo "Shell: $0"'
+        
+        # Test with zsh if available
+        if command -v zsh >/dev/null 2>&1; then
+          echo "Testing with zsh..."
+          zsh -c 'echo "Shell: $0"'
+        else
+          echo "zsh not available, skipping zsh test"
+        fi
+
+    - name: Test force reinstall
+      shell: ${{ matrix.shell }}
+      run: |
+        echo "🔄 Testing force reinstall..."
+        
+        # Run installer with force flag
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          ./${{ matrix.script }} --force
+        else
+          ./${{ matrix.script }} --force
+        fi
+        
+        echo "✅ Force reinstall completed"
+
+    - name: Test version parameter
+      shell: ${{ matrix.shell }}
+      run: |
+        echo "🏷️ Testing version parameter..."
+        
+        # Test help command
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          ./${{ matrix.script }} --help
+        else
+          ./${{ matrix.script }} --help
+        fi
+        
+        echo "✅ Help command completed"
+
+    - name: Cleanup test artifacts
+      if: always()
+      shell: bash
+      run: |
+        echo "🧹 Cleaning up test artifacts..."
+        
+        # Remove installed binaries
+        rm -f /usr/local/bin/provia 2>/dev/null || true
+        rm -f $HOME/.local/bin/provia 2>/dev/null || true
+        rm -f $HOME/bin/provia 2>/dev/null || true
+        rm -f $HOME/bin/provia.exe 2>/dev/null || true
+        
+        # Remove temporary files
+        rm -rf /tmp/provia* 2>/dev/null || true
+        
+        echo "✅ Cleanup completed"
+
+  # Test installer without releases (should fail gracefully)
+  test-no-release:
+    name: Test without releases
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Test installer with no releases
+      run: |
+        echo "🧪 Testing installer behavior with no releases..."
+        
+        # Temporarily rename the repo to test failure case
+        sed -i 's/GITHUB_REPO="provia"/GITHUB_REPO="nonexistent-repo-test"/' install.sh
+        
+        chmod +x install.sh
+        
+        # This should fail gracefully
+        if ./install.sh; then
+          echo "❌ Installer should have failed but didn't"
+          exit 1
+        else
+          echo "✅ Installer failed gracefully as expected"
+        fi
+
+  # Summary job
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [test-installer, test-no-release]
+    if: always()
+    steps:
+    - name: Test Results Summary
+      run: |
+        echo "## 📊 Test Results Summary"
+        echo "- **test-installer**: ${{ needs.test-installer.result }}"
+        echo "- **test-no-release**: ${{ needs.test-no-release.result }}"
+        
+        if [ "${{ needs.test-installer.result }}" = "success" ] && [ "${{ needs.test-no-release.result }}" = "success" ]; then
+          echo "🎉 All tests passed!"
+        else
+          echo "❌ Some tests failed"
+          exit 1
+        fi

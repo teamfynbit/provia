@@ -154,9 +154,11 @@ get_download_url() {
         # Get latest release
         RELEASE_URL="https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/releases/latest"
         print_status "Fetching latest release information..."
-        
+        print_status $RELEASE_URL
         # Extract download URL for the platform
         DOWNLOAD_URL=$(curl -s "$RELEASE_URL" | grep -o "https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/download/[^\"]*${PLATFORM}[^\"]*\.zip" | head -1)
+        print_status $DOWNLOAD_URL
+
         
         if [[ -z "$DOWNLOAD_URL" ]]; then
             print_error "Could not find download URL for platform: $PLATFORM"
@@ -277,26 +279,137 @@ install_binary() {
 }
 
 # Function to add directory to PATH
+# Function to add directory to PATH
 add_to_path() {
     local dir="$1"
     local shell_rc=""
+    local shell_name=""
     
-    # Determine shell configuration file
-    if [[ -n "$BASH_VERSION" ]]; then
-        shell_rc="$HOME/.bashrc"
-        [[ -f "$HOME/.bash_profile" ]] && shell_rc="$HOME/.bash_profile"
-    elif [[ -n "$ZSH_VERSION" ]]; then
-        shell_rc="$HOME/.zshrc"
+    # First, try to detect the user's actual shell
+    if [[ -n "$SHELL" ]]; then
+        shell_name=$(basename "$SHELL")
     else
-        shell_rc="$HOME/.profile"
+        # Fallback to checking parent process
+        shell_name=$(ps -p $PPID -o comm= 2>/dev/null | tr -d '-')
     fi
+    
+    print_status "Detected shell: $shell_name"
+    
+    # Determine shell configuration file based on detected shell
+    case "$shell_name" in
+        zsh)
+            # Check for zsh config files in order of preference
+            if [[ -f "$HOME/.zshrc" ]]; then
+                shell_rc="$HOME/.zshrc"
+            elif [[ -f "$HOME/.zprofile" ]]; then
+                shell_rc="$HOME/.zprofile"
+            else
+                # Create .zshrc if it doesn't exist
+                shell_rc="$HOME/.zshrc"
+                touch "$shell_rc"
+                print_status "Created new .zshrc file"
+            fi
+            ;;
+        bash)
+            # Check for bash config files in order of preference
+            if [[ -f "$HOME/.bashrc" ]]; then
+                shell_rc="$HOME/.bashrc"
+            elif [[ -f "$HOME/.bash_profile" ]]; then
+                shell_rc="$HOME/.bash_profile"
+            elif [[ -f "$HOME/.profile" ]]; then
+                shell_rc="$HOME/.profile"
+            else
+                # Create .bashrc if none exist
+                shell_rc="$HOME/.bashrc"
+                touch "$shell_rc"
+                print_status "Created new .bashrc file"
+            fi
+            ;;
+        fish)
+            # Fish shell uses a different config location
+            shell_rc="$HOME/.config/fish/config.fish"
+            if [[ ! -f "$shell_rc" ]]; then
+                mkdir -p "$(dirname "$shell_rc")"
+                touch "$shell_rc"
+                print_status "Created new fish config file"
+            fi
+            ;;
+        *)
+            # Unknown shell or fallback
+            print_warning "Unknown shell: $shell_name, trying common config files..."
+            
+            # Check common config files in order of preference
+            local config_files=(
+                "$HOME/.zshrc"
+                "$HOME/.bashrc" 
+                "$HOME/.bash_profile"
+                "$HOME/.profile"
+            )
+            
+            for config_file in "${config_files[@]}"; do
+                if [[ -f "$config_file" ]]; then
+                    shell_rc="$config_file"
+                    break
+                fi
+            done
+            
+            # If no config file found, create .profile as universal fallback
+            if [[ -z "$shell_rc" ]]; then
+                shell_rc="$HOME/.profile"
+                touch "$shell_rc"
+                print_status "Created new .profile file as fallback"
+            fi
+            ;;
+    esac
+    
+    print_status "Using config file: $shell_rc"
     
     # Check if directory is already in PATH
     if [[ ":$PATH:" != *":$dir:"* ]]; then
         print_status "Adding $dir to PATH in $shell_rc"
-        echo "export PATH=\"$dir:\$PATH\"" >> "$shell_rc"
+        
+        # Add appropriate export command based on shell
+        if [[ "$shell_name" == "fish" ]]; then
+            # Fish shell syntax
+            echo "set -gx PATH $dir \$PATH" >> "$shell_rc"
+        else
+            # POSIX shell syntax (bash, zsh, etc.)
+            echo "" >> "$shell_rc"
+            echo "# Added by $TOOL_NAME installer" >> "$shell_rc"
+            echo "export PATH=\"$dir:\$PATH\"" >> "$shell_rc"
+        fi
+        
+        # Update current session PATH
         export PATH="$dir:$PATH"
-        print_warning "Please restart your terminal or run: source $shell_rc"
+        
+        print_success "Added $dir to PATH in $shell_rc"
+        
+        # Source the config file to apply changes immediately
+        print_status "Applying changes to current session..."
+        if [[ "$shell_name" == "fish" ]]; then
+            # Fish shell requires different sourcing
+            if command_exists fish; then
+                fish -c "source $shell_rc" 2>/dev/null || print_warning "Could not source fish config, changes will apply on next shell restart"
+            else
+                print_warning "Fish shell not available for sourcing, changes will apply on next shell restart"
+            fi
+        else
+            # POSIX shells (bash, zsh, etc.)
+            if source "$shell_rc" 2>/dev/null; then
+                print_success "Configuration sourced successfully - changes applied immediately"
+            else
+                print_warning "Could not source $shell_rc, changes will apply on next shell restart"
+            fi
+        fi
+    else
+        print_status "$dir is already in PATH"
+    fi
+    
+    # Verify the addition
+    if [[ ":$PATH:" == *":$dir:"* ]]; then
+        print_success "PATH updated successfully for current session"
+    else
+        print_error "Failed to update PATH for current session"
     fi
 }
 
@@ -309,7 +422,7 @@ verify_installation() {
         
         # Try to get version
         if "$TOOL_NAME" --version 2>/dev/null; then
-            print_success "Installation completed successfully!"
+            print_success "Installation completed successfully! Please restart terminal"
         elif "$TOOL_NAME" --help 2>/dev/null; then
             print_success "Installation completed successfully!"
         else
