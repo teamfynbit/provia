@@ -26,15 +26,12 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - os: ubuntu-latest
-            shell: bash
             script: install.sh
             test_command: provia --version || provia --help
           - os: macos-latest
-            shell: bash
             script: install.sh
             test_command: provia --version || provia --help
           - os: windows-latest
-            shell: pwsh
             script: install.bat
             test_command: provia.exe --version || provia.exe --help
 
@@ -93,19 +90,21 @@ jobs:
       if: matrix.os != 'windows-latest'
       run: chmod +x ${{ matrix.script }}
 
-    - name: Test installer script
-      shell: ${{ matrix.shell }}
+    - name: Test installer script (Unix)
+      if: matrix.os != 'windows-latest'
+      shell: bash
       run: |
         echo "🚀 Testing installer script: ${{ matrix.script }}"
-        
-        # Run the installer script
-        if [ "${{ matrix.os }}" = "windows-latest" ]; then
-          ./${{ matrix.script }}
-        else
-          ./${{ matrix.script }}
-        fi
-        
+        ./${{ matrix.script }}
         echo "✅ Installer script completed successfully"
+
+    - name: Test installer script (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        Write-Host "🚀 Testing installer script: ${{ matrix.script }}"
+        ./${{ matrix.script }}
+        Write-Host "✅ Installer script completed successfully"
 
     - name: Test PATH update (Unix)
       if: matrix.os != 'windows-latest'
@@ -208,33 +207,37 @@ jobs:
           echo "zsh not available, skipping zsh test"
         fi
 
-    - name: Test force reinstall
-      shell: ${{ matrix.shell }}
+    - name: Test force reinstall (Unix)
+      if: matrix.os != 'windows-latest'
+      shell: bash
       run: |
         echo "🔄 Testing force reinstall..."
-        
-        # Run installer with force flag
-        if [ "${{ matrix.os }}" = "windows-latest" ]; then
-          ./${{ matrix.script }} --force
-        else
-          ./${{ matrix.script }} --force
-        fi
-        
+        ./${{ matrix.script }} --force
         echo "✅ Force reinstall completed"
 
-    - name: Test version parameter
-      shell: ${{ matrix.shell }}
+    - name: Test force reinstall (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        Write-Host "🔄 Testing force reinstall..."
+        ./${{ matrix.script }} --force
+        Write-Host "✅ Force reinstall completed"
+
+    - name: Test version parameter (Unix)
+      if: matrix.os != 'windows-latest'
+      shell: bash
       run: |
         echo "🏷️ Testing version parameter..."
-        
-        # Test help command
-        if [ "${{ matrix.os }}" = "windows-latest" ]; then
-          ./${{ matrix.script }} --help
-        else
-          ./${{ matrix.script }} --help
-        fi
-        
+        ./${{ matrix.script }} --help
         echo "✅ Help command completed"
+
+    - name: Test version parameter (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        Write-Host "🏷️ Testing version parameter..."
+        ./${{ matrix.script }} --help
+        Write-Host "✅ Help command completed"
 
     - name: Cleanup test artifacts
       if: always()
