@@ -1,12 +1,3 @@
-param(
-    [switch]$Help,
-    [switch]$h,
-    [string]$Version,
-    [string]$v,
-    [switch]$Force,
-    [switch]$f
-)
-
 # Universal Windows Installer Script
 $TOOL_NAME = "provia"
 $GITHUB_USER = "teamfynbit"
@@ -43,20 +34,22 @@ function Write-ColoredOutput {
 function Show-Help {
     Write-Host "Universal Windows Installer for $TOOL_NAME"
     Write-Host ""
-    Write-Host "Usage: .\install.ps1 [OPTIONS]"
+    Write-Host "Usage: iwr -useb https://raw.githubusercontent.com/teamfynbit/provia/main/install.ps1 | iex"
     Write-Host ""
-    Write-Host "Options:"
-    Write-Host "  -Help, -h           Show this help message"
-    Write-Host "  -Version VERSION    Specify version to install (default: latest)"
-    Write-Host "  -v VERSION          Specify version to install (default: latest)"
-    Write-Host "  -Force, -f          Force reinstallation"
+    Write-Host "Environment Variables:"
+    Write-Host "  `$env:PROVIA_VERSION     Specify version to install (default: latest)"
+    Write-Host "  `$env:PROVIA_FORCE       Set to 'true' to force reinstallation"
     Write-Host ""
     Write-Host "Examples:"
-    Write-Host "  .\install.ps1                    # Install latest version"
-    Write-Host "  .\install.ps1 -Version v1.2.3   # Install specific version"
-    Write-Host "  .\install.ps1 -Force            # Force reinstall"
+    Write-Host "  # Install latest version"
+    Write-Host "  iwr -useb https://raw.githubusercontent.com/teamfynbit/provia/main/install.ps1 | iex"
     Write-Host ""
-    exit 0
+    Write-Host "  # Install specific version"
+    Write-Host "  `$env:PROVIA_VERSION='v1.2.3'; iwr -useb https://raw.githubusercontent.com/teamfynbit/provia/main/install.ps1 | iex"
+    Write-Host ""
+    Write-Host "  # Force reinstall"
+    Write-Host "  `$env:PROVIA_FORCE='true'; iwr -useb https://raw.githubusercontent.com/teamfynbit/provia/main/install.ps1 | iex"
+    Write-Host ""
 }
 
 function Test-ExistingInstall {
@@ -67,7 +60,7 @@ function Test-ExistingInstall {
         $InstallDir = "$env:USERPROFILE\bin"
         if (Test-Path "$InstallDir\$TOOL_NAME.exe") {
             Write-ColoredOutput "$TOOL_NAME is already installed at $InstallDir\$TOOL_NAME.exe" "YELLOW" "WARNING"
-            Write-ColoredOutput "Use -Force to reinstall." "YELLOW" "WARNING"
+            Write-ColoredOutput "Set `$env:PROVIA_FORCE='true' to reinstall." "YELLOW" "WARNING"
             return $true
         }
         
@@ -75,7 +68,7 @@ function Test-ExistingInstall {
         $Command = Get-Command $TOOL_NAME -ErrorAction SilentlyContinue
         if ($Command) {
             Write-ColoredOutput "$TOOL_NAME is already available in your PATH" "YELLOW" "WARNING"
-            Write-ColoredOutput "Use -Force to reinstall." "YELLOW" "WARNING"
+            Write-ColoredOutput "Set `$env:PROVIA_FORCE='true' to reinstall." "YELLOW" "WARNING"
             Write-ColoredOutput "Current version:" "BLUE" "INFO"
             try {
                 & $TOOL_NAME --version 2>$null
@@ -96,7 +89,6 @@ function Get-DownloadUrl {
         Write-ColoredOutput "Fetching latest release information..." "BLUE" "INFO"
         
         $ReleaseUrl = "https://api.github.com/repos/$GITHUB_USER/$GITHUB_REPO/releases/latest"
-        Write-Host "release_url"
         
         try {
             # Set TLS 1.2 for older PowerShell versions
@@ -169,12 +161,12 @@ function Invoke-DownloadAndInstall {
         # Look for .exe first
         $ExeFiles = Get-ChildItem -Path $ExtractDir -Name "$TOOL_NAME.exe" -Recurse -ErrorAction SilentlyContinue
         if ($ExeFiles) {
-            $FoundBinary = Join-Path $ExtractDir $ExeFiles[0].FullName.Substring($ExtractDir.Length + 1)
+            $FoundBinary = $ExeFiles[0].FullName
         } else {
             # Try without .exe extension
             $Files = Get-ChildItem -Path $ExtractDir -Name $TOOL_NAME -Recurse -ErrorAction SilentlyContinue
             if ($Files) {
-                $FoundBinary = Join-Path $ExtractDir $Files[0].FullName.Substring($ExtractDir.Length + 1)
+                $FoundBinary = $Files[0].FullName
             }
         }
         
@@ -280,57 +272,43 @@ function Test-Installation {
     return $true
 }
 
-# Main execution
-function Main {
-    # Handle help parameters
-    if ($Help -or $h) {
-        Show-Help
-    }
-    
-    # Handle version parameters
-    $TargetVersion = $VERSION
-    if ($Version) {
-        $TargetVersion = $Version
-    } elseif ($v) {
-        $TargetVersion = $v
-    }
-    
-    # Handle force parameters
-    $ForceInstall = $Force -or $f
-    
-    Write-ColoredOutput "Starting $TOOL_NAME installation..." "BLUE" "INFO"
-    
-    # Check if already installed
-    if (Test-ExistingInstall -ForceInstall $ForceInstall) {
-        if (-not $ForceInstall) {
-            exit 0
-        }
-    }
-    
-    Write-ColoredOutput "Detected platform: $PLATFORM" "BLUE" "INFO"
-    
-    # Get download URL
-    $DownloadUrl = Get-DownloadUrl -TargetVersion $TargetVersion
-    if (-not $DownloadUrl) {
-        exit 1
-    }
-    
-    Write-ColoredOutput "Download URL: $DownloadUrl" "BLUE" "INFO"
-    
-    # Download and install
-    $InstallResult = Invoke-DownloadAndInstall -DownloadUrl $DownloadUrl
-    
-    if ($InstallResult) {
-        Write-ColoredOutput "Installation completed successfully!" "GREEN" "SUCCESS"
-        Write-Host ""
-        Write-ColoredOutput "You can now use '$TOOL_NAME' from any PowerShell session" "BLUE" "INFO"
-        Write-ColoredOutput "If the command is not found, please restart your PowerShell session" "YELLOW" "WARNING"
-        exit 0
-    } else {
-        Write-ColoredOutput "Installation failed" "RED" "ERROR"
-        exit 1
+# Parse environment variables for options
+$TargetVersion = if ($env:PROVIA_VERSION) { $env:PROVIA_VERSION } else { $VERSION }
+$ForceInstall = $env:PROVIA_FORCE -eq "true"
+
+# Check for help request
+if ($env:PROVIA_HELP -eq "true" -or $args -contains "--help" -or $args -contains "-h") {
+    Show-Help
+    return
+}
+
+Write-ColoredOutput "Starting $TOOL_NAME installation..." "BLUE" "INFO"
+
+# Check if already installed
+if (Test-ExistingInstall -ForceInstall $ForceInstall) {
+    if (-not $ForceInstall) {
+        return
     }
 }
 
-# Run main function
-Main
+Write-ColoredOutput "Detected platform: $PLATFORM" "BLUE" "INFO"
+
+# Get download URL
+$DownloadUrl = Get-DownloadUrl -TargetVersion $TargetVersion
+if (-not $DownloadUrl) {
+    throw "Failed to get download URL"
+}
+
+Write-ColoredOutput "Download URL: $DownloadUrl" "BLUE" "INFO"
+
+# Download and install
+$InstallResult = Invoke-DownloadAndInstall -DownloadUrl $DownloadUrl
+
+if ($InstallResult) {
+    Write-ColoredOutput "Installation completed successfully!" "GREEN" "SUCCESS"
+    Write-Host ""
+    Write-ColoredOutput "You can now use '$TOOL_NAME' from any PowerShell session" "BLUE" "INFO"
+    Write-ColoredOutput "If the command is not found, please restart your PowerShell session" "YELLOW" "WARNING"
+} else {
+    throw "Installation failed"
+}
